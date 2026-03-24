@@ -1,0 +1,36 @@
+{
+  "schema": "1.0",
+  "type": "whmcs-security",
+  "name": "passkey",
+  "category": "security",
+"description": {
+    "name": "Passkey (Biometric) Security",
+    "tagline": "Passwordless Biometric Authentication for WHMCS",
+    "long": "The eHostPK Passkey Security module for WHMCS brings next-generation passwordless authentication to your billing area. This plugin allows both Clients and Admins to secure their accounts using device-native biometrics like Mac TouchID, Windows Hello, FaceID, or Fingerprint scanners. Built with high-grade AES-256-GCM encryption and WebAuthn protocol, it ensures top-tier security without the need for traditional passwords or SMS OTPs. Configuration is seamless via the admin panel with full support for multi-session environments.",
+    "features": [
+        "Passwordless login using native device biometrics",
+        "Supports Mac TouchID, iPhone FaceID, and Android Fingerprint",
+        "High-grade AES-256-GCM encryption for credential storage",
+        "Full CSRF protection for all authentication requests",
+        "Smart Multi-Session detection for Admin and Client areas",
+        "Dynamic Display Names: Full Name ( Email ) on biometric prompt",
+        "Seamless integration with WHMCS 2FA (Two-Factor Authentication) system",
+        "Automatic fallback to backup codes if biometric device is unavailable",
+        "One-click device registration for quick setup",
+        "No external library dependencies - purely native WebAuthn implementation"
+    ]
+  },
+  "logo": {
+    "filename": "logo.png"
+  },
+  "support": {
+    "homepage": "https:\/\/ehostpk.com",
+    "docs_url": "https:\/\/ehostpk.com\/lab\/passkey"
+  },
+  "authors": [
+    {
+      "name": "Khurram Shahzad",
+      "homepage": "https://ehostpk.com/"
+    }
+  ]
+}
