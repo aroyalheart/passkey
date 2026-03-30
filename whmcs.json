@@ -23,14 +23,15 @@
   "logo": {
     "filename": "logo.png"
   },
-  "support": {
-    "homepage": "https:\/\/ehostpk.com",
-    "docs_url": "https:\/\/ehostpk.com\/lab\/passkey"
+"support": {
+    "homepage": "https://ehostpk.com",
+    "support_url": "https://www.ehostpk.com/contact-us/",
+    "docs_url": "https://github.com/aroyalheart/passkey"
   },
   "authors": [
     {
       "name": "Khurram Shahzad",
-      "homepage": "https://ehostpk.com/"
+      "homepage": "https://khurram.pk"
     }
   ]
 }
