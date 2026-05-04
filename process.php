@@ -1,4 +1,5 @@
 <?php
+
 /**
  * Passkey Process Engine for Passkey
  * Handles WebAuthn Registration & Verification (Secure Version)
@@ -9,6 +10,7 @@ error_reporting(0);
 ini_set('display_errors', 0);
 
 require_once __DIR__ . '/../../../init.php';
+
 use WHMCS\Database\Capsule;
 
 // Output buffer clean
@@ -16,13 +18,18 @@ if (ob_get_length()) ob_clean();
 header('Content-Type: application/json');
 
 // ─── Constants & Encryption Settings ─────────────────────────────────────────
-define('PASSKEY_ENC_KEY', hash('sha256', $cc_encryption_hash, true));
+// Store as hex (not raw binary) so the constant is always a safe UTF-8 string.
+// hex2bin() is called at the point of use.
+if (!defined('PASSKEY_ENC_KEY')) {
+    define('PASSKEY_ENC_KEY', hash('sha256', $cc_encryption_hash));
+}
 
 // ─── Encryption Helpers ──────────────────────────────────────────────────────
-function passkey_encrypt($data) {
+function passkey_encrypt($data)
+{
     $iv = random_bytes(12);
     $tag = "";
-    $ciphertext = openssl_encrypt($data, 'aes-256-gcm', PASSKEY_ENC_KEY, OPENSSL_RAW_DATA, $iv, $tag);
+    $ciphertext = openssl_encrypt($data, 'aes-256-gcm', hex2bin(PASSKEY_ENC_KEY), OPENSSL_RAW_DATA, $iv, $tag);
     return base64_encode($iv . $tag . $ciphertext);
 }
 
@@ -31,7 +38,6 @@ $requestedWith = $_SERVER['HTTP_X_REQUESTED_WITH'] ?? '';
 if (strtolower($requestedWith) !== 'xmlhttprequest' && !isset($_GET['action'])) {
     header('HTTP/1.1 403 Forbidden');
     die(json_encode(['status' => 'error', 'error' => 'Direct API access is prohibited.']));
-
 }
 
 // ─── Origin & Referer Lockdown (Postman Block) ───────────────────────────
@@ -76,6 +82,11 @@ if (!$userId) {
     exit;
 }
 
+// True only when the user has completed full authentication (not just the password step).
+// 2FA-pending sessions ($twoFaAdmin/$twoFaClient) must NOT be allowed to manage passkeys,
+// as that would let an attacker who passed the password step register/delete passkeys.
+$isFullSession = (bool)($adminId ?: $clientId);
+
 $action = $_GET['action'] ?? '';
 
 switch ($action) {
@@ -114,31 +125,148 @@ switch ($action) {
                     'name' => $email ?: ($userType . '_' . $userId), // Unique internal name (Email is best)
                     'displayName' => $displayName
                 ]
-            ]);
+            ], JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
         } catch (\Exception $e) {
             echo json_encode(['status' => 'error', 'error' => 'Token failed.']);
         }
         break;
 
     case 'save_registration':
+        if (!$isFullSession) {
+            http_response_code(403);
+            die(json_encode(['status' => 'error', 'error' => 'Passkey registration requires a fully authenticated session.']));
+        }
+
         $input = json_decode(file_get_contents('php://input'), true);
         if (empty($input['id'])) die(json_encode(['status' => 'error', 'error' => 'No data.']));
 
+        // Enforce a per-user passkey limit
+        $passkeyCount = Capsule::table('mod_passkeys')
+            ->where('user_id', $userId)
+            ->where('user_type', $userType)
+            ->count();
+        if ($passkeyCount >= 10) {
+            die(json_encode(['status' => 'error', 'error' => 'Maximum of 10 passkeys reached. Please remove an existing device first.']));
+        }
+
         try {
             $encryptedId = passkey_encrypt($input['id']);
+            $deviceName  = (isset($input['device_name']) && is_string($input['device_name'])) ? substr(trim($input['device_name']), 0, 100) : '';
+            if (empty($deviceName)) $deviceName = 'My Device';
 
-            Capsule::table('mod_passkeys')->updateOrInsert(
-                ['user_id' => $userId, 'user_type' => $userType],
-                [
-                    'credential_id' => $encryptedId,
-                    'public_key' => json_encode($input['response'] ?? 'biometric_data'),
-                    'created_at' => date('Y-m-d H:i:s')
-                ]
-            );
+            Capsule::table('mod_passkeys')->insert([
+                'user_id'       => $userId,
+                'user_type'     => $userType,
+                'credential_id' => $encryptedId,
+                'public_key'    => json_encode($input['response'] ?? 'biometric_data'),
+                'device_name'   => $deviceName,
+                'counter'       => 0,
+                'created_at'    => date('Y-m-d H:i:s'),
+            ]);
 
             echo json_encode(['status' => 'success']);
         } catch (\Exception $e) {
             echo json_encode(['status' => 'error', 'error' => $e->getMessage()]);
+        }
+        break;
+
+    case 'list_passkeys':
+        if (!$isFullSession) {
+            http_response_code(403);
+            die(json_encode(['status' => 'error', 'error' => 'Passkey management requires a fully authenticated session.']));
+        }
+
+        try {
+            $rows = Capsule::table('mod_passkeys')
+                ->where('user_id', $userId)
+                ->where('user_type', $userType)
+                ->orderBy('created_at', 'asc')
+                ->select(['id', 'device_name', 'created_at'])
+                ->get();
+
+            $list = [];
+            foreach ($rows as $pk) {
+                $list[] = [
+                    'id'          => (int) $pk->id,
+                    'device_name' => $pk->device_name ?: 'Unnamed Device',
+                    'created_at'  => $pk->created_at,
+                ];
+            }
+            echo json_encode(['status' => 'success', 'passkeys' => $list]);
+        } catch (\Exception $e) {
+            echo json_encode(['status' => 'error', 'error' => 'Failed to load passkeys.']);
+        }
+        break;
+
+    case 'delete_passkey':
+        if (!$isFullSession) {
+            http_response_code(403);
+            die(json_encode(['status' => 'error', 'error' => 'Passkey management requires a fully authenticated session.']));
+        }
+
+        $input    = json_decode(file_get_contents('php://input'), true);
+        $deleteId = isset($input['id']) ? (int) $input['id'] : 0;
+        if ($deleteId <= 0) die(json_encode(['status' => 'error', 'error' => 'Invalid passkey ID.']));
+
+        try {
+            $deleted = Capsule::table('mod_passkeys')
+                ->where('id', $deleteId)
+                ->where('user_id', $userId)
+                ->where('user_type', $userType)
+                ->delete();
+
+            if ($deleted) {
+                echo json_encode(['status' => 'success']);
+            } else {
+                echo json_encode(['status' => 'error', 'error' => 'Passkey not found or already removed.']);
+            }
+        } catch (\Exception $e) {
+            echo json_encode(['status' => 'error', 'error' => 'Failed to remove passkey.']);
+        }
+        break;
+
+    case 'update_passkey_name':
+        if (!$isFullSession) {
+            http_response_code(403);
+            die(json_encode(['status' => 'error', 'error' => 'Passkey management requires a fully authenticated session.']));
+        }
+
+        $input    = json_decode(file_get_contents('php://input'), true);
+        $updateId = isset($input['id']) ? (int) $input['id'] : 0;
+        if ($updateId <= 0) die(json_encode(['status' => 'error', 'error' => 'Invalid passkey ID.']));
+
+        $deviceName = (isset($input['device_name']) && is_string($input['device_name'])) ? substr(trim($input['device_name']), 0, 100) : '';
+        if (empty($deviceName)) {
+            $deviceName = 'My Device';
+        }
+
+        try {
+            $existing = Capsule::table('mod_passkeys')
+                ->where('id', $updateId)
+                ->where('user_id', $userId)
+                ->where('user_type', $userType)
+                ->select(['id', 'device_name'])
+                ->first();
+
+            if (!$existing) {
+                echo json_encode(['status' => 'error', 'error' => 'Passkey not found.']);
+                break;
+            }
+
+            if (($existing->device_name ?: '') === $deviceName) {
+                echo json_encode(['status' => 'success']);
+                break;
+            }
+
+            Capsule::table('mod_passkeys')
+                ->where('id', $updateId)
+                ->where('user_id', $userId)
+                ->where('user_type', $userType)
+                ->update(['device_name' => $deviceName]);
+
+            echo json_encode(['status' => 'success']);
+        } catch (\Exception $e) {
+            echo json_encode(['status' => 'error', 'error' => 'Failed to update device name.']);
         }
         break;
 
@@ -158,9 +286,9 @@ switch ($action) {
             $iv = substr($data, 0, 12);
             $tag = substr($data, 12, 16);
             $ciphertext = substr($data, 28);
-            
-            $decryptedId = openssl_decrypt($ciphertext, 'aes-256-gcm', PASSKEY_ENC_KEY, OPENSSL_RAW_DATA, $iv, $tag);
-            
+
+            $decryptedId = openssl_decrypt($ciphertext, 'aes-256-gcm', hex2bin(PASSKEY_ENC_KEY), OPENSSL_RAW_DATA, $iv, $tag);
+
             if ($decryptedId === $input['id']) {
                 $found = true;
                 break;
@@ -170,7 +298,7 @@ switch ($action) {
         if ($found) {
             $_SESSION['passkey_verified'] = true;
             if ($twoFaAdmin || $twoFaClient) {
-                $_SESSION['2fa_verified'] = true; 
+                $_SESSION['2fa_verified'] = true;
             }
             echo json_encode(['status' => 'success']);
             unset($_SESSION['passkey_challenge']);
