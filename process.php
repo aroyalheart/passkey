@@ -221,6 +221,51 @@ switch ($action) {
         }
         break;
 
+    case 'update_passkey_name':
+        if (!$isFullSession) {
+            http_response_code(403);
+            die(json_encode(['status' => 'error', 'error' => 'Passkey management requires a fully authenticated session.']));
+        }
+
+        $input    = json_decode(file_get_contents('php://input'), true);
+        $updateId = isset($input['id']) ? (int) $input['id'] : 0;
+        if ($updateId <= 0) die(json_encode(['status' => 'error', 'error' => 'Invalid passkey ID.']));
+
+        $deviceName = (isset($input['device_name']) && is_string($input['device_name'])) ? substr(trim($input['device_name']), 0, 100) : '';
+        if (empty($deviceName)) {
+            $deviceName = 'My Device';
+        }
+
+        try {
+            $existing = Capsule::table('mod_passkeys')
+                ->where('id', $updateId)
+                ->where('user_id', $userId)
+                ->where('user_type', $userType)
+                ->select(['id', 'device_name'])
+                ->first();
+
+            if (!$existing) {
+                echo json_encode(['status' => 'error', 'error' => 'Passkey not found.']);
+                break;
+            }
+
+            if (($existing->device_name ?: '') === $deviceName) {
+                echo json_encode(['status' => 'success']);
+                break;
+            }
+
+            Capsule::table('mod_passkeys')
+                ->where('id', $updateId)
+                ->where('user_id', $userId)
+                ->where('user_type', $userType)
+                ->update(['device_name' => $deviceName]);
+
+            echo json_encode(['status' => 'success']);
+        } catch (\Exception $e) {
+            echo json_encode(['status' => 'error', 'error' => 'Failed to update device name.']);
+        }
+        break;
+
     case 'verify_login':
         $input = json_decode(file_get_contents('php://input'), true);
         if (empty($input['id'])) die(json_encode(['status' => 'error', 'error' => 'No ID.']));

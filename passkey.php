@@ -83,23 +83,96 @@ function passkey_activate($params)
     }
 
     return <<<HTML
-    <div class="panel panel-default" style="border:2px solid #185bb6; border-radius:6px;">
+    <style>
+        #passkeyPanel .passkey-section-title {
+            margin: 0 0 10px;
+            font-size: 20px;
+            font-weight: 500;
+            color: #2c3e50;
+        }
+        #passkeyPanel .passkey-muted {
+            color: #6f7b85;
+            margin-bottom: 12px;
+        }
+        #passkeyPanel .passkey-table-wrap {
+            overflow-x: auto;
+            border: 1px solid #d9dee4;
+            border-radius: 4px;
+        }
+        #passkeyPanel .passkey-table {
+            margin-bottom: 0;
+            background: #fff;
+        }
+        #passkeyPanel .passkey-table thead th {
+            background: #f6f8fa;
+            border-bottom: 1px solid #d9dee4;
+        }
+        #passkeyPanel .passkey-name-label {
+            display: inline-block;
+            max-width: 260px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            vertical-align: middle;
+            white-space: nowrap;
+        }
+        #passkeyPanel .passkey-name-input {
+            min-width: 180px;
+            max-width: 260px;
+            display: none;
+        }
+        #passkeyPanel .passkey-actions .btn {
+            margin-right: 4px;
+            margin-bottom: 4px;
+        }
+        #passkeyPanel .passkey-actions .btn:last-child {
+            margin-right: 0;
+        }
+        #passkeyPanel .passkey-add-wrap {
+            max-width: 560px;
+        }
+        #passkeyPanel .passkey-status {
+            display: block;
+            margin-top: 10px;
+            padding: 8px 10px;
+            border-radius: 4px;
+            border: 1px solid transparent;
+            font-weight: 500;
+        }
+        #passkeyPanel .passkey-status-info {
+            color: #3f566b;
+            background: #eef4f9;
+            border-color: #d2e0ec;
+        }
+        #passkeyPanel .passkey-status-success {
+            color: #237a3b;
+            background: #eaf8ee;
+            border-color: #cbe9d3;
+        }
+        #passkeyPanel .passkey-status-error {
+            color: #a94442;
+            background: #fdeeee;
+            border-color: #f4c9c9;
+        }
+    </style>
+
+    <div id="passkeyPanel" class="panel panel-default" style="border:2px solid #185bb6; border-radius:6px;">
         <div class="panel-heading" style="background:#185bb6; color:#fff; border-radius:4px 4px 0 0;">
             <i class="fa fa-fingerprint"></i> <strong>Passkey Management</strong>
         </div>
-        <div class="panel-body">
+        <div class="panel-body" style="padding:20px 22px 18px; background:#fbfcfe;">
 
-            <h5 style="margin-top:0;"><i class="fa fa-list"></i> Registered Devices</h5>
-            <div id="passkeyDeviceList">
-                <i class="fa fa-spinner fa-spin"></i> Loading...
+            <h4 class="passkey-section-title"><i class="fa fa-list"></i> Registered Devices</h4>
+            <div class="passkey-muted">Manage your passkeys and update device labels any time.</div>
+            <div id="passkeyDeviceList" class="passkey-table-wrap" aria-live="polite">
+                <div style="padding:10px;"><i class="fa fa-spinner fa-spin"></i> Loading...</div>
             </div>
 
-            <hr style="margin:15px 0;">
+            <hr style="margin:18px 0;">
 
-            <h5><i class="fa fa-plus-circle"></i> Add a New Device</h5>
-            <div class="input-group" style="max-width:440px;">
+            <h4 class="passkey-section-title" style="margin-bottom:8px;"><i class="fa fa-plus-circle"></i> Add a New Device</h4>
+            <div class="input-group passkey-add-wrap">
                 <input type="text" id="deviceNameInput" class="form-control"
-                       placeholder="e.g. My iPhone, Work Laptop" maxlength="100">
+                       placeholder="e.g. My iPhone, Work Laptop" maxlength="100" aria-label="Device Name">
                 <span class="input-group-btn">
                     <button type="button" id="regBtn" class="btn btn-success" onclick="startPasskeyRegistration()">
                         <i class="fa fa-fingerprint"></i> Register Device
@@ -120,6 +193,20 @@ function passkey_activate($params)
         return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
     }
 
+    function passkeySetStatus(message, tone) {
+        var status = document.getElementById('passkeyStatus');
+        if (!status) return;
+        if (!message) {
+            status.style.display = 'none';
+            status.innerHTML = '';
+            status.className = '';
+            return;
+        }
+        status.style.display = 'block';
+        status.className = 'passkey-status passkey-status-' + passkeyEscHtml(tone || 'info');
+        status.innerHTML = message;
+    }
+
     function passkeyUpdateSignal(count) {
         document.getElementById('passkey_verified_signal').value = count > 0 ? '1' : '0';
     }
@@ -128,21 +215,101 @@ function passkey_activate($params)
         var container = document.getElementById('passkeyDeviceList');
         passkeyUpdateSignal(devices.length);
         if (!devices.length) {
-            container.innerHTML = '<p class="text-muted" style="margin:0;">No devices registered yet. Add one below.</p>';
+            container.innerHTML = '<div style="padding:10px;"><p class="text-muted" style="margin:0;">No devices registered yet. Add one below.</p></div>';
             return;
         }
         var rows = devices.map(function(d) {
+            var id = parseInt(d.id, 10);
+            var deviceName = d.device_name || 'Unnamed Device';
             return '<tr>' +
-                '<td><i class="fa fa-mobile-alt" style="color:#185bb6;"></i>&nbsp;<strong>' + passkeyEscHtml(d.device_name || 'Unnamed Device') + '</strong></td>' +
+                '<td>' +
+                '<i class="fa fa-mobile" style="color:#185bb6;"></i>&nbsp;' +
+                '<strong id="pkNameLabel_' + id + '" class="passkey-name-label">' + passkeyEscHtml(deviceName) + '</strong>' +
+                '<input id="pkNameInput_' + id + '" class="form-control input-sm passkey-name-input" type="text" maxlength="100" value="' + passkeyEscHtml(deviceName) + '">' +
+                '</td>' +
                 '<td class="text-muted" style="font-size:12px; white-space:nowrap;">' + passkeyEscHtml(d.created_at) + '</td>' +
-                '<td style="white-space:nowrap;"><button type="button" class="btn btn-danger btn-xs" onclick="passkeyDelete(' + parseInt(d.id, 10) + ', this)">' +
-                '<i class="fa fa-trash"></i> Remove</button></td>' +
+                '<td class="passkey-actions" style="white-space:nowrap;">' +
+                '<button type="button" id="pkEditBtn_' + id + '" class="btn btn-default btn-xs" onclick="passkeyStartEdit(' + id + ')"><i class="fa fa-pencil"></i> Edit</button>' +
+                '<button type="button" id="pkSaveBtn_' + id + '" class="btn btn-primary btn-xs" style="display:none;" onclick="passkeySaveEdit(' + id + ', this)"><i class="fa fa-check"></i> Save</button>' +
+                '<button type="button" id="pkCancelBtn_' + id + '" class="btn btn-link btn-xs" style="display:none;" onclick="passkeyCancelEdit(' + id + ')">Cancel</button>' +
+                '<button type="button" class="btn btn-danger btn-xs" onclick="passkeyDelete(' + id + ', this)"><i class="fa fa-trash"></i> Remove</button>' +
+                '</td>' +
                 '</tr>';
         });
         container.innerHTML =
-            '<table class="table table-condensed table-bordered" style="margin-bottom:0;">' +
+            '<table class="table table-condensed table-bordered passkey-table">' +
             '<thead><tr><th>Device Name</th><th>Registered</th><th></th></tr></thead>' +
             '<tbody>' + rows.join('') + '</tbody></table>';
+    }
+
+    function passkeyStartEdit(id) {
+        var label = document.getElementById('pkNameLabel_' + id);
+        var input = document.getElementById('pkNameInput_' + id);
+        var editBtn = document.getElementById('pkEditBtn_' + id);
+        var saveBtn = document.getElementById('pkSaveBtn_' + id);
+        var cancelBtn = document.getElementById('pkCancelBtn_' + id);
+        if (!label || !input || !editBtn || !saveBtn || !cancelBtn) return;
+
+        input.value = label.textContent.trim();
+        label.style.display = 'none';
+        input.style.display = 'inline-block';
+        editBtn.style.display = 'none';
+        saveBtn.style.display = 'inline-block';
+        cancelBtn.style.display = 'inline-block';
+        input.focus();
+        input.select();
+    }
+
+    function passkeyCancelEdit(id) {
+        var label = document.getElementById('pkNameLabel_' + id);
+        var input = document.getElementById('pkNameInput_' + id);
+        var editBtn = document.getElementById('pkEditBtn_' + id);
+        var saveBtn = document.getElementById('pkSaveBtn_' + id);
+        var cancelBtn = document.getElementById('pkCancelBtn_' + id);
+        if (!label || !input || !editBtn || !saveBtn || !cancelBtn) return;
+
+        input.style.display = 'none';
+        label.style.display = 'inline-block';
+        saveBtn.style.display = 'none';
+        cancelBtn.style.display = 'none';
+        editBtn.style.display = 'inline-block';
+    }
+
+    function passkeySaveEdit(id, btn) {
+        var input = document.getElementById('pkNameInput_' + id);
+        var label = document.getElementById('pkNameLabel_' + id);
+        if (!input || !label) return;
+
+        var nextName = input.value.trim();
+        if (!nextName) {
+            passkeySetStatus('<i class="fa fa-warning"></i> Please enter a device name.', 'error');
+            input.focus();
+            return;
+        }
+
+        btn.disabled = true;
+        fetch(PASSKEY_PROCESS_PATH + '?action=update_passkey_name', {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': PASSKEY_CSRF_TOKEN },
+            body: JSON.stringify({ id: id, device_name: nextName })
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            btn.disabled = false;
+            if (data.status === 'success') {
+                label.textContent = nextName;
+                input.value = nextName;
+                passkeyCancelEdit(id);
+                passkeySetStatus('<i class="fa fa-check"></i> Device name updated successfully.', 'success');
+            } else {
+                passkeySetStatus('<i class="fa fa-warning"></i> Failed to update device name: ' + passkeyEscHtml(data.error || 'Unknown error'), 'error');
+            }
+        })
+        .catch(function() {
+            btn.disabled = false;
+            passkeySetStatus('<i class="fa fa-warning"></i> Request failed while updating device name. Please try again.', 'error');
+        });
     }
 
     function passkeyLoadList() {
@@ -157,16 +324,19 @@ function passkey_activate($params)
             } else {
                 document.getElementById('passkeyDeviceList').innerHTML =
                     '<span class="text-danger">Failed to load devices.</span>';
+                passkeySetStatus('<i class="fa fa-warning"></i> Failed to load registered devices.', 'error');
             }
         })
         .catch(function() {
             document.getElementById('passkeyDeviceList').innerHTML =
                 '<span class="text-danger">Failed to load devices.</span>';
+            passkeySetStatus('<i class="fa fa-warning"></i> Failed to load registered devices.', 'error');
         });
     }
 
     function passkeyDelete(id, btn) {
         if (!confirm('Remove this passkey? You will no longer be able to log in with it.')) return;
+        passkeySetStatus('', '');
         btn.disabled = true;
         fetch(PASSKEY_PROCESS_PATH + '?action=delete_passkey', {
             method: 'POST',
@@ -177,22 +347,24 @@ function passkey_activate($params)
         .then(function(r) { return r.json(); })
         .then(function(data) {
             if (data.status === 'success') {
+                passkeySetStatus('<i class="fa fa-check"></i> Device removed successfully.', 'success');
                 passkeyLoadList();
             } else {
                 btn.disabled = false;
-                alert('Failed to remove passkey: ' + (data.error || 'Unknown error'));
+                passkeySetStatus('<i class="fa fa-warning"></i> Failed to remove passkey: ' + passkeyEscHtml(data.error || 'Unknown error'), 'error');
             }
         })
-        .catch(function() { btn.disabled = false; alert('Request failed. Please try again.'); });
+        .catch(function() {
+            btn.disabled = false;
+            passkeySetStatus('<i class="fa fa-warning"></i> Request failed while removing passkey. Please try again.', 'error');
+        });
     }
 
     async function startPasskeyRegistration() {
         if (window.passkeyProcessing) return;
-        var status = document.getElementById('passkeyStatus');
         var btn = document.getElementById('regBtn');
         var deviceName = document.getElementById('deviceNameInput').value.trim() || 'My Device';
-        status.style.display = 'block';
-        status.innerHTML = '<i class="fa fa-spinner fa-spin"></i> Initialising...';
+        passkeySetStatus('<i class="fa fa-spinner fa-spin"></i> Initialising passkey registration...', 'info');
         btn.disabled = true;
 
         try {
@@ -219,7 +391,7 @@ function passkey_activate($params)
             });
 
             window.passkeyProcessing = true;
-            status.innerHTML = '<i class="fa fa-sync fa-spin"></i> Saving...';
+            passkeySetStatus('<i class="fa fa-sync fa-spin"></i> Saving passkey...', 'info');
 
             var saveRes = await fetch(PASSKEY_PROCESS_PATH + '?action=save_registration', {
                 method: 'POST',
@@ -243,7 +415,7 @@ function passkey_activate($params)
 
             if (result.status === 'success') {
                 document.getElementById('deviceNameInput').value = '';
-                status.innerHTML = '<b class="text-success"><i class="fa fa-check"></i> Device registered successfully!</b>';
+                passkeySetStatus('<i class="fa fa-check"></i> Device registered successfully!', 'success');
                 passkeyLoadList();
             } else {
                 throw new Error(result.error || 'Registration failed.');
@@ -252,9 +424,9 @@ function passkey_activate($params)
             window.passkeyProcessing = false;
             btn.disabled = false;
             if (err.name !== 'NotAllowedError' && err.name !== 'AbortError') {
-                status.innerHTML = '<span class="text-danger">Registration failed: ' + passkeyEscHtml(err.message) + '</span>';
+                passkeySetStatus('<i class="fa fa-warning"></i> Registration failed: ' + passkeyEscHtml(err.message), 'error');
             } else {
-                status.style.display = 'none';
+                passkeySetStatus('<i class="fa fa-warning"></i> Passkey registration was cancelled.', 'error');
             }
         }
     }
